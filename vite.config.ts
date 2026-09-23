@@ -7,4 +7,15 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+
+  server: {
+    proxy: {
+      '/woo-api': {
+        target: 'https://lakavernshop.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/woo-api/, '/wp-json/wc/store/v1'),
+      },
+    },
+  },
 })
