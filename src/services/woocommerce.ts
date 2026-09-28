@@ -27,11 +27,11 @@ export interface StoreApiImage {
 }
 
 export interface StoreApiCategory {
-  image: any;
   id: number;
   name: string;
   slug: string;
   count: number;
+  image?: StoreApiImage | null;
 }
 
 export interface StoreApiAttributeTerm {
@@ -214,6 +214,13 @@ export const wooApi = {
       query.category = params.category;
     }
     return request<StoreApiProduct[]>('/products', query);
+  },
+
+  // Récupère un produit précis par son id — utilisé notamment pour aller
+  // chercher l'image propre à UNE variation (couleur), qui n'est pas incluse
+  // dans le tableau "variations" du produit parent.
+  getProductById: (id: number) => {
+    return request<StoreApiProduct>(`/products/${id}`);
   },
 
   // Version paginée : renvoie aussi le nombre total de pages/produits,

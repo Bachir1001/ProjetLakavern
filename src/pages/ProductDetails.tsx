@@ -36,9 +36,17 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
 
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
+  // Détermine si la grande image affichée vient de la galerie du produit,
+  // ou de la photo propre à la couleur choisie.
+  const [imageOverrideMode, setImageOverrideMode] = useState<'gallery' | 'variation'>('gallery');
 
   const [relatedProducts, setRelatedProducts] = useState<StoreApiProduct[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
+
+  // Image propre à chaque variation (couleur), chargée séparément car elle
+  // n'est pas incluse dans product.variations (qui ne donne que id + attributs).
+  const [variationImages, setVariationImages] = useState<Record<number, string>>({});
+  const [variationImagesLoading, setVariationImagesLoading] = useState(false);
 
   const variationAttribute = useMemo(() => {
     return product.attributes?.find(
@@ -73,6 +81,7 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
     setSelectedImage(0);
     setQuantity(1);
     setSelectedTermSlug(variationAttribute?.terms?.[0]?.slug ?? '');
+    setImageOverrideMode('gallery');
     window.scrollTo({ top: 0, behavior: 'smooth' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product.id]);
@@ -102,6 +111,48 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
       })
       .finally(() => setRelatedLoading(false));
   }, [product.id]);
+
+  // Charge l'image propre de chaque variation (couleur), une par une, via
+  // l'endpoint public /products/{id} — aucune clé secrète nécessaire.
+  useEffect(() => {
+    if (!hasVariations || !product.variations || product.variations.length === 0) {
+      setVariationImages({});
+      return;
+    }
+
+    let cancelled = false;
+    setVariationImagesLoading(true);
+
+    Promise.all(
+      product.variations.map((variation) =>
+        wooApi
+          .getProductById(variation.id)
+          .then((full) => ({ id: variation.id, src: full.images?.[0]?.src }))
+          .catch(() => ({ id: variation.id, src: undefined }))
+      )
+    ).then((results) => {
+      if (cancelled) return;
+      const map: Record<number, string> = {};
+      results.forEach((r) => {
+        if (r.src) map[r.id] = r.src;
+      });
+      setVariationImages(map);
+      setVariationImagesLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [product.id, hasVariations]);
+
+  // Retrouve la variation correspondant à un terme donné (ex: le slug "rouge"),
+  // pour aller chercher son image dans variationImages.
+  const getVariationImageForTerm = (termSlug: string): string | undefined => {
+    const variation = product.variations?.find((v) =>
+      v.attributes?.some((attr) => attr.value === termSlug)
+    );
+    return variation ? variationImages[variation.id] : undefined;
+  };
 
   const handleAddToCart = () => {
     if (hasVariations && !selectedVariation) {
@@ -153,6 +204,14 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
     addToCart(relatedProduct, 1);
   };
 
+  // Image principale à afficher en grand : celle de la couleur choisie si
+  // l'utilisateur vient de cliquer une vignette couleur, sinon celle de la
+  // galerie classique du produit.
+  const mainImage =
+    imageOverrideMode === 'variation' && selectedVariation && variationImages[selectedVariation.id]
+      ? { src: variationImages[selectedVariation.id], alt: selectedTerm?.name || product.name }
+      : product.images?.[selectedImage];
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 font-sans">
 
@@ -176,13 +235,10 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
 
           <div className="bg-gray-50 rounded-2xl overflow-hidden aspect-square flex items-center justify-center">
 
-            {product.images?.[selectedImage] ? (
+            {mainImage ? (
               <img
-                src={product.images[selectedImage].src}
-                alt={
-                  product.images[selectedImage].alt ||
-                  product.name
-                }
+                src={mainImage.src}
+                alt={mainImage.alt || product.name}
                 className="w-full h-full object-contain"
               />
             ) : (
@@ -199,9 +255,12 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
               {product.images.map((image, index) => (
                 <button
                   key={image.id || index}
-                  onClick={() => setSelectedImage(index)}
+                  onClick={() => {
+                    setSelectedImage(index);
+                    setImageOverrideMode('gallery');
+                  }}
                   className={`aspect-square rounded-xl overflow-hidden border-2 cursor-pointer bg-gray-50 ${
-                    selectedImage === index
+                    imageOverrideMode === 'gallery' && selectedImage === index
                       ? 'border-[#00c8db]'
                       : 'border-transparent hover:border-gray-300'
                   }`}
@@ -290,6 +349,9 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
 
               <p className="font-extrabold text-gray-900 mb-3">
                 {variationAttribute.name}
+                {selectedTerm && (
+                  <span className="font-normal text-gray-500"> — {selectedTerm.name}</span>
+                )}
               </p>
 
               <div className="flex flex-wrap gap-3">
@@ -299,19 +361,47 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
                   const selected =
                     selectedTermSlug === term.slug;
 
+                  const swatchImage = getVariationImageForTerm(term.slug);
+
                   return (
                     <button
                       key={term.id}
-                      onClick={() =>
-                        setSelectedTermSlug(term.slug)
-                      }
-                      className={`px-5 py-3 rounded-lg border-2 font-semibold transition-all cursor-pointer ${
-                        selected
-                          ? 'border-[#00c8db] bg-cyan-50 text-[#00aebf]'
-                          : 'border-gray-200 text-gray-700 hover:border-[#00c8db]'
-                      }`}
+                      onClick={() => {
+                        setSelectedTermSlug(term.slug);
+                        setImageOverrideMode('variation');
+                      }}
+                      title={term.name}
+                      aria-label={term.name}
+                      className={`flex flex-col items-center gap-1.5 cursor-pointer group`}
                     >
-                      {term.name}
+                      <span
+                        className={`w-16 h-16 rounded-xl overflow-hidden border-2 flex items-center justify-center bg-gray-50 transition-all ${
+                          selected
+                            ? 'border-[#00c8db] ring-2 ring-[#00c8db]/30'
+                            : 'border-gray-200 group-hover:border-gray-300'
+                        }`}
+                      >
+                        {swatchImage ? (
+                          <img
+                            src={swatchImage}
+                            alt={term.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : variationImagesLoading ? (
+                          <span className="w-5 h-5 rounded-full border-2 border-gray-300 border-t-transparent animate-spin" />
+                        ) : (
+                          <span className="text-[10px] text-gray-500 font-semibold text-center px-1 leading-tight">
+                            {term.name}
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        className={`text-xs font-semibold ${
+                          selected ? 'text-[#00aebf]' : 'text-gray-600'
+                        }`}
+                      >
+                        {term.name}
+                      </span>
                     </button>
                   );
                 })}
