@@ -164,6 +164,5 @@ export const useCart = () => {
       'useCart doit être utilisé à l’intérieur de CartProvider'
     );
   }
-
   return context;
 };

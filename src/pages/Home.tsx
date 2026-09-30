@@ -156,15 +156,6 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, onSelectCategory }) => {
                   VISUALISER NOTRE CATALOGUE
                 </button>
               </div>
-
-              <div className="mt-4 pl-2">
-                <p className="font-serif text-cyan-800 sm:text-white text-base sm:text-lg leading-tight drop-shadow-sm font-semibold">
-                  RENTRÉE SCOLAIRE
-                </p>
-                <p className="font-serif text-fuchsia-600 sm:text-fuchsia-300 text-base sm:text-lg leading-tight drop-shadow-sm font-semibold">
-                  2026/2027
-                </p>
-              </div>
             </div>
           </div>
 

@@ -12,22 +12,23 @@ import type { PageType } from '../App';
 import { useCart } from '../context/CartContext';
 import { formatStorePrice } from '../services/woocommerce';
 import { DeliverySelector } from '../components/DeliverySelector';
-import { createPaymentSession, type PaymentProvider } from '../services/paymentApi';
+import { createPaymentSession, verifyPayment } from '../services/paymentApi';
 
 interface CheckoutProps {
   onNavigate: (page: PageType) => void;
 }
 
-type PaymentMethod = 'wave' | 'orange_money' | 'cash';
+type PaymentMethod = 'cash' | 'online';
 
-// Ce qu'on garde de côté en local avant de partir sur Wave/Orange Money,
-// pour pouvoir afficher la confirmation une fois revenu sur le site.
+// Ce qu'on garde de côté avant de partir sur la page de paiement, pour pouvoir
+// vérifier le paiement et afficher la confirmation au retour sur le site.
 interface PendingOrder {
   fullName: string;
   phone: string;
   total: number;
   neighborhoodName: string;
   clientReference: string;
+  invoiceToken: string | null;
 }
 
 const PENDING_ORDER_KEY = 'lakavern_pending_order';
@@ -47,6 +48,7 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
 
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [orderConfirmed, setOrderConfirmed] = useState(false);
   const [lastOrderTotal, setLastOrderTotal] = useState(0);
   const [lastOrderName, setLastOrderName] = useState('');
@@ -61,34 +63,59 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
 
   const total = subtotal + deliveryFee;
 
-  // Au chargement de la page : si on revient d'un paiement Wave/Orange Money
-  // (redirection avec ?payment=success ou ?payment=error dans l'URL), on
-  // affiche le bon écran, sans perdre les infos de la commande en cours.
+  // Au chargement : si on revient de la page de paiement PayDunya
+  // (?payment=return ou ?payment=cancel), on traite le résultat.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const paymentStatus = params.get('payment');
+    const search = window.location.search;
+    const marker = search.match(/payment=(return|cancel)/)?.[1];
 
-    if (!paymentStatus) return;
+    if (!marker) return;
+
+    // Nettoie l'adresse pour ne pas retraiter le retour à un rechargement
+    window.history.replaceState({}, '', window.location.pathname);
 
     const rawPending = localStorage.getItem(PENDING_ORDER_KEY);
     const pending: PendingOrder | null = rawPending ? JSON.parse(rawPending) : null;
 
-    if (paymentStatus === 'success') {
-      if (pending) {
-        setLastOrderTotal(pending.total);
-        setLastOrderName(pending.fullName);
-        setLastOrderPhone(pending.phone);
-      }
-      setOrderConfirmed(true);
-      clearCart();
+    if (marker === 'cancel') {
+      setFormError('Le paiement a été annulé. Vous pouvez réessayer ou choisir de payer à la livraison.');
       localStorage.removeItem(PENDING_ORDER_KEY);
-    } else if (paymentStatus === 'error') {
-      setFormError('Le paiement a été annulé ou a échoué. Vous pouvez réessayer ou choisir un autre mode de paiement.');
-      localStorage.removeItem(PENDING_ORDER_KEY);
+      return;
     }
 
-    // Nettoie l'URL pour ne pas re-déclencher ce traitement à un rechargement
-    window.history.replaceState({}, '', window.location.pathname);
+    // marker === 'return' : on vérifie le vrai statut du paiement côté serveur
+    const invoiceToken =
+      pending?.invoiceToken ?? search.match(/token=([^&]+)/)?.[1] ?? null;
+
+    if (!invoiceToken) {
+      setFormError("Impossible de vérifier votre paiement. Si vous avez été débité, contactez-nous au 77 240 58 58.");
+      return;
+    }
+
+    setVerifying(true);
+
+    verifyPayment(invoiceToken)
+      .then((status) => {
+        if (status === 'completed') {
+          if (pending) {
+            setLastOrderTotal(pending.total);
+            setLastOrderName(pending.fullName);
+            setLastOrderPhone(pending.phone);
+          }
+          setOrderConfirmed(true);
+          clearCart();
+          localStorage.removeItem(PENDING_ORDER_KEY);
+        } else if (status === 'pending') {
+          setFormError("Votre paiement est en cours de traitement. Si vous avez été débité, contactez-nous au 77 240 58 58.");
+        } else {
+          setFormError("Le paiement n'a pas abouti. Vous pouvez réessayer ou choisir de payer à la livraison.");
+          localStorage.removeItem(PENDING_ORDER_KEY);
+        }
+      })
+      .catch(() => {
+        setFormError("Impossible de vérifier votre paiement pour le moment. Si vous avez été débité, contactez-nous au 77 240 58 58.");
+      })
+      .finally(() => setVerifying(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -121,34 +148,32 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
       return;
     }
 
-    // Paiement en ligne (Wave / Orange Money) : on crée la session côté
-    // serveur, puis on redirige le navigateur vers l'app / la page de paiement.
+    // Paiement en ligne : on crée la facture côté serveur, puis on redirige
+    // le client vers la page de paiement PayDunya (Wave, Orange Money, etc.).
     setSubmitting(true);
 
     const clientReference = `order_${Date.now()}`;
-
-    const pendingOrder: PendingOrder = {
-      fullName,
-      phone,
-      total,
-      neighborhoodName,
-      clientReference,
-    };
-    localStorage.setItem(PENDING_ORDER_KEY, JSON.stringify(pendingOrder));
-
     const baseUrl = `${window.location.origin}${window.location.pathname}`;
 
     try {
-      const redirectUrl = await createPaymentSession({
-        provider: paymentMethod as PaymentProvider,
+      const session = await createPaymentSession({
         amount: Math.round(total),
         clientReference,
-        successUrl: `${baseUrl}?payment=success`,
-        errorUrl: `${baseUrl}?payment=error`,
+        successUrl: `${baseUrl}?payment=return`,
+        errorUrl: `${baseUrl}?payment=cancel`,
       });
 
-      // Ouvre l'application Wave / Orange Money (ou leur page web de secours)
-      window.location.href = redirectUrl;
+      const pendingOrder: PendingOrder = {
+        fullName,
+        phone,
+        total,
+        neighborhoodName,
+        clientReference,
+        invoiceToken: session.token,
+      };
+      localStorage.setItem(PENDING_ORDER_KEY, JSON.stringify(pendingOrder));
+
+      window.location.href = session.redirectUrl;
     } catch (err) {
       console.error('Erreur lors de la création de la session de paiement :', err);
       setFormError(
@@ -156,10 +181,24 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
           ? err.message
           : "Impossible de lancer le paiement pour le moment. Réessayez."
       );
-      localStorage.removeItem(PENDING_ORDER_KEY);
       setSubmitting(false);
     }
   };
+
+  // ================================
+  // VÉRIFICATION DU PAIEMENT EN COURS
+  // ================================
+  if (verifying) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-24 text-center font-sans">
+        <Loader2 className="w-12 h-12 animate-spin text-[#00c8db] mx-auto mb-6" />
+        <h1 className="text-xl font-bold text-gray-800 mb-2">
+          Vérification de votre paiement...
+        </h1>
+        <p className="text-gray-500">Merci de patienter quelques secondes.</p>
+      </div>
+    );
+  }
 
   // ================================
   // ÉCRAN DE CONFIRMATION
@@ -211,6 +250,9 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
         >
           Aller à la boutique
         </button>
+        {formError && (
+          <p className="text-sm text-red-500 font-medium mt-6">{formError}</p>
+        )}
       </div>
     );
   }
@@ -286,11 +328,10 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Méthode de paiement
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {([
                   { id: 'cash', label: 'Espèces à la livraison' },
-                  { id: 'wave', label: 'Wave' },
-                  { id: 'orange_money', label: 'Orange Money' },
+                  { id: 'online', label: 'Paiement en ligne' },
                 ] as { id: PaymentMethod; label: string }[]).map((option) => (
                   <button
                     key={option.id}
@@ -306,9 +347,9 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
                   </button>
                 ))}
               </div>
-              {paymentMethod !== 'cash' && (
+              {paymentMethod === 'online' && (
                 <p className="text-xs text-gray-500 mt-2">
-                  Vous serez redirigé vers l'application {paymentMethod === 'wave' ? 'Wave' : 'Orange Money'} pour finaliser le paiement.
+                  Vous serez redirigé vers la page de paiement sécurisée PayDunya, où vous choisirez votre moyen de paiement (Wave, Orange Money, etc.).
                 </p>
               )}
             </div>
@@ -333,7 +374,7 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
               ) : paymentMethod === 'cash' ? (
                 'VALIDER LA COMMANDE'
               ) : (
-                `PAYER AVEC ${paymentMethod === 'wave' ? 'WAVE' : 'ORANGE MONEY'}`
+                'PAYER EN LIGNE'
               )}
             </button>
           </form>

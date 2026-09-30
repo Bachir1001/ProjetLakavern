@@ -14,14 +14,17 @@ export default defineConfig({
         target: 'https://lakavernshop.com',
         changeOrigin: true,
         secure: true,
-        rewrite: (path) => path.replace(/^\/woo-api/, '/wp-json/wc/store/v1'),
+        rewrite: (path) =>
+          path.replace(/^\/woo-api/, '/wp-json/wc/store/v1'),
       },
+
       '/lakavern-api': {
-      target: 'https://lakavernshop.com',
-      changeOrigin: true,
-      secure: true,
-      rewrite: (path) => path.replace(/^\/lakavern-api/, '/wp-json/lakavern/v1'),
-    },
+        target: 'https://lakavernshop.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) =>
+          path.replace(/^\/lakavern-api/, '/wp-json/lakavern/v1'),
+      },
     },
   },
 })

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
@@ -17,14 +17,6 @@ import {
   useCart,
 } from './context/CartContext';
 
-// Déclaration du type global pour TypeScript
-declare global {
-  interface Window {
-    $crisp: any[];
-    CRISP_WEBSITE_ID: string;
-  }
-}
-
 export type PageType =
   | 'home'
   | 'about'
@@ -35,19 +27,6 @@ export type PageType =
   | 'checkout';
 
 function AppContent() {
-  // Charge le script Crisp au montage de l'application
-  useEffect(() => {
-    // Remplacez cette valeur par votre ID de site disponible dans Crisp
-    window.$crisp = [];
-    window.CRISP_WEBSITE_ID = "VOTRE_WEBSITE_ID_CRISP";
-
-    const d = document;
-    const s = d.createElement("script");
-    s.src = "https://client.crisp.chat/l.js";
-    s.async = true;
-    d.getElementsByTagName("head")[0].appendChild(s);
-  }, []);
-
   // Si on revient d'un paiement Wave / Orange Money (?payment=success|error),
   // on démarre directement sur la page Checkout pour afficher le résultat.
   const [currentPage, setCurrentPage] =
