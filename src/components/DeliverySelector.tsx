@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { DAKAR_NEIGHBORHOODS, type Neighborhood } from '../data/dakarNeighborhoods';
-import { MapPin, Truck, CheckCircle } from 'lucide-react';
+
+import { MapPin, Truck } from 'lucide-react';
 
 interface DeliverySelectorProps {
   onSelectDeliveryFee: (fee: number, neighborhoodName: string) => void;
