@@ -1,77 +1,115 @@
-// Appelle notre plugin WordPress "LaKavern - Paiement en ligne (PayDunya)".
-// Aucune clé secrète n'est jamais présente côté navigateur.
+// Appelle notre plugin WordPress "LaKavern - Commandes & Paiement en ligne".
+// Le plugin crée la vraie commande WooCommerce et confie le paiement à l'extension
+// PayDunya installée sur WordPress. Aucune clé secrète n'est présente côté navigateur.
 
 // "/lakavern-api" est un proxy (comme "/woo-api" pour les produits) qui redirige
-// vers https://VOTRE-SITE/wp-json/lakavern/v1 — voir vite.config.ts.
-const PAYMENT_API_BASE = '/lakavern-api';
+// vers https://VOTRE-SITE/wp-json/lakavern/v1 — voir vite.config.ts (en local)
+// et vercel.json (en ligne).
+const API_BASE = '/lakavern-api';
 
-interface CreatePaymentSessionParams {
-  amount: number; // en FCFA, nombre entier
+export interface OrderItemInput {
+  productId: number;
+  variationId?: number;
+  quantity: number;
+}
+
+export interface OrderBillingInput {
+  fullName: string;
+  phone: string;
+  email?: string;
+  address?: string;
+  neighborhood: string;
+}
+
+export interface CreateOrderParams {
+  items: OrderItemInput[];
+  billing: OrderBillingInput;
+  deliveryFee: number; // en FCFA
+  paymentMethod: 'paydunya' | 'cod';
   clientReference: string;
-  successUrl: string;
-  errorUrl: string;
+  returnUrl: string; // adresse du site React où ramener le client après le paiement
 }
 
-export interface PaymentSession {
-  redirectUrl: string; // page de paiement PayDunya (Wave, Orange Money, etc.)
-  token: string | null; // jeton de la facture, pour vérifier le paiement au retour
+export interface CreatedOrder {
+  orderId: number;
+  orderKey: string;
+  total: number; // total réel calculé par le serveur, en FCFA
+  redirectUrl: string | null; // null pour un paiement à la livraison
 }
 
-export type PaymentStatus = 'completed' | 'pending' | 'cancelled' | 'failed' | 'unknown';
+export interface OrderStatus {
+  status: string; // statut WooCommerce : pending, processing, completed, failed, cancelled...
+  paid: boolean;
+  total: number;
+  orderNumber: string;
+}
+
+async function readJson(response: Response) {
+  return response.json().catch(() => null);
+}
 
 /**
- * Crée la facture côté serveur et renvoie l'adresse vers laquelle rediriger
- * le client pour qu'il choisisse son moyen de paiement et paie.
+ * Crée la commande sur WooCommerce. Pour un paiement en ligne, la réponse contient
+ * l'adresse vers laquelle envoyer le client pour qu'il paie.
  */
-export async function createPaymentSession(
-  params: CreatePaymentSessionParams
-): Promise<PaymentSession> {
-  const response = await fetch(`${PAYMENT_API_BASE}/create-payment`, {
+export async function createOrder(params: CreateOrderParams): Promise<CreatedOrder> {
+  const response = await fetch(`${API_BASE}/create-order`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      amount: params.amount,
+      items: params.items.map((item) => ({
+        product_id: item.productId,
+        variation_id: item.variationId ?? 0,
+        quantity: item.quantity,
+      })),
+      billing: {
+        full_name: params.billing.fullName,
+        phone: params.billing.phone,
+        email: params.billing.email ?? '',
+        address: params.billing.address ?? '',
+        neighborhood: params.billing.neighborhood,
+      },
+      delivery_fee: params.deliveryFee,
+      payment_method: params.paymentMethod,
       client_reference: params.clientReference,
-      success_url: params.successUrl,
-      error_url: params.errorUrl,
+      return_url: params.returnUrl,
     }),
   });
 
-  const data = await response.json().catch(() => null);
+  const data = await readJson(response);
 
-  if (!response.ok || !data?.redirect_url) {
+  if (!response.ok || !data?.order_id) {
     throw new Error(
-      (data && (data.message || data.code)) ||
-        'Impossible de créer la session de paiement. Réessayez dans un instant.'
+      (data && data.message) ||
+        'Impossible de créer la commande pour le moment. Réessayez dans un instant.'
     );
   }
 
   return {
-    redirectUrl: data.redirect_url as string,
-    token: (data.token as string | null) ?? null,
+    orderId: data.order_id as number,
+    orderKey: data.order_key as string,
+    total: Number(data.total),
+    redirectUrl: (data.redirect_url as string | null) ?? null,
   };
 }
 
 /**
- * Demande au serveur le statut réel d'un paiement (il interroge PayDunya).
- * À utiliser au retour du client sur le site, avant d'afficher "commande confirmée".
+ * Demande au serveur le statut réel d'une commande. À utiliser quand le client
+ * revient sur le site après le paiement, avant d'afficher "commande confirmée".
  */
-export async function verifyPayment(token: string): Promise<PaymentStatus> {
-  const response = await fetch(
-    `${PAYMENT_API_BASE}/verify-payment?token=${encodeURIComponent(token)}`
-  );
-
-  const data = await response.json().catch(() => null);
+export async function getOrderStatus(orderId: number, orderKey: string): Promise<OrderStatus> {
+  const query = new URLSearchParams({ order_id: String(orderId), key: orderKey });
+  const response = await fetch(`${API_BASE}/order-status?${query.toString()}`);
+  const data = await readJson(response);
 
   if (!response.ok || !data?.status) {
-    throw new Error('Impossible de vérifier le paiement pour le moment.');
+    throw new Error('Impossible de vérifier la commande pour le moment.');
   }
 
-  const status = String(data.status).toLowerCase();
-
-  if (status === 'completed') return 'completed';
-  if (status === 'pending') return 'pending';
-  if (status === 'cancelled' || status === 'canceled') return 'cancelled';
-  if (status === 'failed') return 'failed';
-  return 'unknown';
+  return {
+    status: String(data.status),
+    paid: Boolean(data.paid),
+    total: Number(data.total),
+    orderNumber: String(data.order_number ?? orderId),
+  };
 }

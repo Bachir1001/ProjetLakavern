@@ -12,7 +12,7 @@ import type { PageType } from '../App';
 import { useCart } from '../context/CartContext';
 import { formatStorePrice } from '../services/woocommerce';
 import { DeliverySelector } from '../components/DeliverySelector';
-import { createPaymentSession, verifyPayment } from '../services/paymentApi';
+import { createOrder, getOrderStatus } from '../services/paymentApi';
 
 interface CheckoutProps {
   onNavigate: (page: PageType) => void;
@@ -21,14 +21,13 @@ interface CheckoutProps {
 type PaymentMethod = 'cash' | 'online';
 
 // Ce qu'on garde de côté avant de partir sur la page de paiement, pour pouvoir
-// vérifier le paiement et afficher la confirmation au retour sur le site.
+// retrouver la commande et afficher la confirmation au retour sur le site.
 interface PendingOrder {
+  orderId: number;
+  orderKey: string;
   fullName: string;
   phone: string;
   total: number;
-  neighborhoodName: string;
-  clientReference: string;
-  invoiceToken: string | null;
 }
 
 const PENDING_ORDER_KEY = 'lakavern_pending_order';
@@ -43,16 +42,20 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
   // Coordonnées client
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [addressDetails, setAddressDetails] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
 
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  // Paiement pas encore confirmé par le serveur : on propose de vérifier à nouveau
+  const [awaitingPayment, setAwaitingPayment] = useState<PendingOrder | null>(null);
   const [orderConfirmed, setOrderConfirmed] = useState(false);
   const [lastOrderTotal, setLastOrderTotal] = useState(0);
   const [lastOrderName, setLastOrderName] = useState('');
   const [lastOrderPhone, setLastOrderPhone] = useState('');
+  const [lastOrderNumber, setLastOrderNumber] = useState('');
 
   const subtotal = cartItems.reduce((sum, item) => {
     const price =
@@ -63,59 +66,71 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
 
   const total = subtotal + deliveryFee;
 
-  // Au chargement : si on revient de la page de paiement PayDunya
-  // (?payment=return ou ?payment=cancel), on traite le résultat.
-  useEffect(() => {
-    const search = window.location.search;
-    const marker = search.match(/payment=(return|cancel)/)?.[1];
+  // Demande au serveur si la commande est payée, puis affiche le bon écran.
+  const checkPaymentStatus = async (pending: PendingOrder) => {
+    setVerifying(true);
+    setFormError('');
 
-    if (!marker) return;
+    try {
+      const result = await getOrderStatus(pending.orderId, pending.orderKey);
+
+      if (result.paid) {
+        setLastOrderTotal(result.total);
+        setLastOrderName(pending.fullName);
+        setLastOrderPhone(pending.phone);
+        setLastOrderNumber(result.orderNumber);
+        setAwaitingPayment(null);
+        setOrderConfirmed(true);
+        clearCart();
+        localStorage.removeItem(PENDING_ORDER_KEY);
+      } else if (result.status === 'pending' || result.status === 'on-hold') {
+        // Le paiement n'est pas (encore) confirmé : la confirmation peut arriver avec un léger retard.
+        setAwaitingPayment(pending);
+      } else {
+        setAwaitingPayment(null);
+        setFormError("Le paiement n'a pas abouti. Vous pouvez réessayer ou choisir de payer à la livraison.");
+        localStorage.removeItem(PENDING_ORDER_KEY);
+      }
+    } catch {
+      setAwaitingPayment(pending);
+      setFormError("Impossible de vérifier votre paiement pour le moment. Si vous avez été débité, contactez-nous au 77 240 58 58.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  // Au chargement : si on revient du paiement (?payment=return&order=...&key=...),
+  // on interroge le serveur pour savoir si la commande est bien payée.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment') !== 'return') return;
+
+    const orderId = Number(params.get('order'));
+    const orderKey = params.get('key') ?? '';
 
     // Nettoie l'adresse pour ne pas retraiter le retour à un rechargement
     window.history.replaceState({}, '', window.location.pathname);
 
-    const rawPending = localStorage.getItem(PENDING_ORDER_KEY);
-    const pending: PendingOrder | null = rawPending ? JSON.parse(rawPending) : null;
-
-    if (marker === 'cancel') {
-      setFormError('Le paiement a été annulé. Vous pouvez réessayer ou choisir de payer à la livraison.');
-      localStorage.removeItem(PENDING_ORDER_KEY);
+    if (!orderId || !orderKey) {
+      setFormError("Impossible de retrouver votre commande. Si vous avez été débité, contactez-nous au 77 240 58 58.");
       return;
     }
 
-    // marker === 'return' : on vérifie le vrai statut du paiement côté serveur
-    const invoiceToken =
-      pending?.invoiceToken ?? search.match(/token=([^&]+)/)?.[1] ?? null;
-
-    if (!invoiceToken) {
-      setFormError("Impossible de vérifier votre paiement. Si vous avez été débité, contactez-nous au 77 240 58 58.");
-      return;
+    let stored: Partial<PendingOrder> | null = null;
+    try {
+      const raw = localStorage.getItem(PENDING_ORDER_KEY);
+      stored = raw ? JSON.parse(raw) : null;
+    } catch {
+      stored = null;
     }
 
-    setVerifying(true);
-
-    verifyPayment(invoiceToken)
-      .then((status) => {
-        if (status === 'completed') {
-          if (pending) {
-            setLastOrderTotal(pending.total);
-            setLastOrderName(pending.fullName);
-            setLastOrderPhone(pending.phone);
-          }
-          setOrderConfirmed(true);
-          clearCart();
-          localStorage.removeItem(PENDING_ORDER_KEY);
-        } else if (status === 'pending') {
-          setFormError("Votre paiement est en cours de traitement. Si vous avez été débité, contactez-nous au 77 240 58 58.");
-        } else {
-          setFormError("Le paiement n'a pas abouti. Vous pouvez réessayer ou choisir de payer à la livraison.");
-          localStorage.removeItem(PENDING_ORDER_KEY);
-        }
-      })
-      .catch(() => {
-        setFormError("Impossible de vérifier votre paiement pour le moment. Si vous avez été débité, contactez-nous au 77 240 58 58.");
-      })
-      .finally(() => setVerifying(false));
+    checkPaymentStatus({
+      orderId,
+      orderKey,
+      fullName: stored?.fullName ?? '',
+      phone: stored?.phone ?? '',
+      total: stored?.total ?? 0,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -138,48 +153,59 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
       return;
     }
 
-    // Paiement à la livraison : pas de redirection, on confirme directement.
-    if (paymentMethod === 'cash') {
-      setLastOrderTotal(total);
-      setLastOrderName(fullName);
-      setLastOrderPhone(phone);
-      setOrderConfirmed(true);
-      clearCart();
-      return;
-    }
-
-    // Paiement en ligne : on crée la facture côté serveur, puis on redirige
-    // le client vers la page de paiement PayDunya (Wave, Orange Money, etc.).
     setSubmitting(true);
 
-    const clientReference = `order_${Date.now()}`;
-    const baseUrl = `${window.location.origin}${window.location.pathname}`;
-
     try {
-      const session = await createPaymentSession({
-        amount: Math.round(total),
-        clientReference,
-        successUrl: `${baseUrl}?payment=return`,
-        errorUrl: `${baseUrl}?payment=cancel`,
+      // Crée la vraie commande WooCommerce. Les prix sont relus côté serveur.
+      const order = await createOrder({
+        items: cartItems.map((item) => ({
+          productId: item.product.id,
+          variationId: item.variationId,
+          quantity: item.quantity,
+        })),
+        billing: {
+          fullName: fullName.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
+          address: addressDetails.trim(),
+          neighborhood: neighborhoodName,
+        },
+        deliveryFee,
+        paymentMethod: paymentMethod === 'cash' ? 'cod' : 'paydunya',
+        clientReference: `order_${Date.now()}`,
+        returnUrl: `${window.location.origin}${window.location.pathname}`,
       });
 
-      const pendingOrder: PendingOrder = {
-        fullName,
-        phone,
-        total,
-        neighborhoodName,
-        clientReference,
-        invoiceToken: session.token,
-      };
-      localStorage.setItem(PENDING_ORDER_KEY, JSON.stringify(pendingOrder));
+      // Paiement à la livraison : la commande est enregistrée, on confirme directement.
+      if (!order.redirectUrl) {
+        setLastOrderTotal(order.total);
+        setLastOrderName(fullName);
+        setLastOrderPhone(phone);
+        setLastOrderNumber(String(order.orderId));
+        setOrderConfirmed(true);
+        setSubmitting(false);
+        clearCart();
+        return;
+      }
 
-      window.location.href = session.redirectUrl;
+      // Paiement en ligne : on garde de quoi retrouver la commande, puis on envoie
+      // le client payer (l'extension PayDunya ouvre Wave, Orange Money, etc.).
+      const pending: PendingOrder = {
+        orderId: order.orderId,
+        orderKey: order.orderKey,
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        total: order.total,
+      };
+      localStorage.setItem(PENDING_ORDER_KEY, JSON.stringify(pending));
+
+      window.location.href = order.redirectUrl;
     } catch (err) {
-      console.error('Erreur lors de la création de la session de paiement :', err);
+      console.error('Erreur lors de la création de la commande :', err);
       setFormError(
         err instanceof Error
           ? err.message
-          : "Impossible de lancer le paiement pour le moment. Réessayez."
+          : 'Impossible de valider la commande pour le moment. Réessayez.'
       );
       setSubmitting(false);
     }
@@ -201,6 +227,48 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
   }
 
   // ================================
+  // PAIEMENT PAS ENCORE CONFIRMÉ
+  // ================================
+  if (awaitingPayment) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-20 text-center font-sans">
+        <Loader2 className="w-12 h-12 text-[#00c8db] mx-auto mb-6" />
+        <h1 className="text-2xl font-extrabold text-gray-900 mb-3">
+          Paiement en cours de confirmation
+        </h1>
+        <p className="text-gray-600 mb-2">
+          Nous n'avons pas encore reçu la confirmation de votre paiement. Cela peut prendre quelques instants.
+        </p>
+        <p className="text-gray-500 text-sm mb-8">
+          Si vous avez été débité, ne payez pas une seconde fois : contactez-nous au 77 240 58 58.
+        </p>
+
+        {formError && (
+          <p className="text-sm text-red-500 font-medium mb-6">{formError}</p>
+        )}
+
+        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          <button
+            onClick={() => checkPaymentStatus(awaitingPayment)}
+            className="bg-[#00c8db] hover:bg-[#00b3c4] text-white font-bold px-8 py-3 rounded-lg transition-colors cursor-pointer"
+          >
+            Vérifier à nouveau
+          </button>
+          <button
+            onClick={() => {
+              setAwaitingPayment(null);
+              setFormError('');
+            }}
+            className="border border-gray-300 text-gray-600 hover:bg-gray-50 font-bold px-8 py-3 rounded-lg transition-colors cursor-pointer"
+          >
+            Retour à la commande
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ================================
   // ÉCRAN DE CONFIRMATION
   // ================================
   if (orderConfirmed) {
@@ -213,7 +281,8 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
           Commande confirmée !
         </h1>
         <p className="text-gray-600 mb-1">
-          Merci {lastOrderName}, nous avons bien reçu votre commande.
+          Merci {lastOrderName}, nous avons bien reçu votre commande
+          {lastOrderNumber ? ` n°${lastOrderNumber}` : ''}.
         </p>
         <p className="text-gray-600 mb-8">
           Total : <span className="font-bold text-[#00c8db]">
@@ -307,6 +376,19 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="Ex: 77 240 58 58"
+                className="w-full bg-gray-50 border border-gray-300 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-[#00c8db] focus:ring-1 focus:ring-[#00c8db]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                E-mail (optionnel)
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Ex: awa@example.com"
                 className="w-full bg-gray-50 border border-gray-300 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-[#00c8db] focus:ring-1 focus:ring-[#00c8db]"
               />
             </div>
