@@ -1,0 +1,17 @@
+
+{
+  "rewrites": [
+    {
+      "source": "/woo-api/:path*",
+      "destination": "https://lakavernshop.com/wp-json/wc/store/v1/:path*"
+    },
+    {
+      "source": "/lakavern-api/:path*",
+      "destination": "https://lakavernshop.com/wp-json/lakavern/v1/:path*"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
