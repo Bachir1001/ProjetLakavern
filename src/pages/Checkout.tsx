@@ -362,7 +362,7 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
                 type="text"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="Ex: Awa Diop"
+                placeholder="Ex: Bassirou Thiam"
                 className="w-full bg-gray-50 border border-gray-300 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-[#00c8db] focus:ring-1 focus:ring-[#00c8db]"
               />
             </div>
@@ -388,7 +388,7 @@ export const Checkout: React.FC<CheckoutProps> = ({ onNavigate }) => {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="Ex: awa@example.com"
+                placeholder="Ex: bachir@example.com"
                 className="w-full bg-gray-50 border border-gray-300 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-[#00c8db] focus:ring-1 focus:ring-[#00c8db]"
               />
             </div>
