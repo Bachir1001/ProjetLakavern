@@ -138,10 +138,10 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, onSelectCategory }) => {
           </div>
 
             {/* Encart texte turquoise, superposé en haut à gauche */}
-            <div className="relative z-10 mx-4 -mt-1 mb-4 sm:mx-6 sm:mb-6 md:absolute md:top-6 md:left-6 md:mx-0 md:mt-0 md:mb-0 md:w-[min(440px,calc(100%-3rem))]">
-              <div className="bg-gradient-to-br from-[#0e7c8a] to-[#14b8c9] rounded-2xl px-5 py-5 sm:px-7 sm:py-6 shadow-xl">
+            <div className="relative z-10 w-[calc(100%-2rem)] max-w-[320px] mx-auto my-4 sm:max-w-[380px] sm:my-6 md:absolute md:top-6 md:left-6 md:w-[min(440px,calc(100%-3rem))] md:max-w-none md:mx-0 md:my-0">
+              <div className="bg-gradient-to-br from-[#0e7c8a] to-[#14b8c9] rounded-xl sm:rounded-2xl px-4 py-4 sm:px-7 sm:py-6 shadow-xl">
                 <div className="border-l-4 border-fuchsia-500 pl-3 sm:pl-4 mb-4 sm:mb-5">
-                  <h1 className="font-serif text-xl sm:text-2xl lg:text-3xl xl:text-4xl text-white leading-snug break-words">
+                  <h1 className="font-serif text-lg sm:text-2xl lg:text-3xl xl:text-4xl text-white leading-snug break-words">
                     S'équiper pour réussir
                     <br />
                     c'est dans{' '}
@@ -153,7 +153,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, onSelectCategory }) => {
                 <button
                   type="button"
                   onClick={() => setIsCatalogueOpen(true)}
-                  className="w-full sm:w-auto max-w-full bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-bold text-[11px] sm:text-sm tracking-wide sm:tracking-wider px-4 sm:px-6 py-3 rounded-full transition-colors cursor-pointer shadow-md text-center leading-snug"
+                  className="block w-full sm:w-auto max-w-full bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-bold text-[10px] sm:text-sm tracking-normal sm:tracking-wider px-3 sm:px-6 py-2.5 sm:py-3 rounded-full transition-colors cursor-pointer shadow-md text-center leading-snug"
                 >
                   VISUALISER NOTRE CATALOGUE
                 </button>
