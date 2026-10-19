@@ -91,7 +91,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, onSelectCategory }) => {
         <div className="max-w-[1800px] mx-auto relative">
 
           {/* Image de fond du slide actuel */}
-          <div className="relative w-full h-[320px] sm:h-[420px] lg:h-[560px]">
+          <div className="relative w-full h-[220px] sm:h-[360px] md:h-[440px] lg:h-[560px]">
             {bannerImages.map((src, index) => (
               <img
                 key={src + index}
@@ -135,11 +135,13 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, onSelectCategory }) => {
               ))}
             </div>
 
+          </div>
+
             {/* Encart texte turquoise, superposé en haut à gauche */}
-            <div className="absolute top-6 left-4 sm:top-6 sm:left-6 z-10 max-w-md">
-              <div className="bg-gradient-to-br from-[#0e7c8a] to-[#14b8c9] rounded-2xl px-6 py-4 sm:px-8 sm:py-6 shadow-xl">
-                <div className="border-l-4 border-fuchsia-500 pl-4 mb-5">
-                  <h1 className="font-serif text-2xl sm:text-3xl lg:text-4xl text-white leading-snug">
+            <div className="relative z-10 mx-4 -mt-1 mb-4 sm:mx-6 sm:mb-6 md:absolute md:top-6 md:left-6 md:mx-0 md:mt-0 md:mb-0 md:w-[min(440px,calc(100%-3rem))]">
+              <div className="bg-gradient-to-br from-[#0e7c8a] to-[#14b8c9] rounded-2xl px-5 py-5 sm:px-7 sm:py-6 shadow-xl">
+                <div className="border-l-4 border-fuchsia-500 pl-3 sm:pl-4 mb-4 sm:mb-5">
+                  <h1 className="font-serif text-xl sm:text-2xl lg:text-3xl xl:text-4xl text-white leading-snug break-words">
                     S'équiper pour réussir
                     <br />
                     c'est dans{' '}
@@ -151,13 +153,12 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, onSelectCategory }) => {
                 <button
                   type="button"
                   onClick={() => setIsCatalogueOpen(true)}
-                  className="inline-block bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-bold text-xs sm:text-sm tracking-[0.15em] px-6 py-3 rounded-full transition-colors cursor-pointer shadow-md"
+                  className="w-full sm:w-auto max-w-full bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-bold text-[11px] sm:text-sm tracking-wide sm:tracking-wider px-4 sm:px-6 py-3 rounded-full transition-colors cursor-pointer shadow-md text-center leading-snug"
                 >
                   VISUALISER NOTRE CATALOGUE
                 </button>
               </div>
             </div>
-          </div>
 
           {/* Ligne du bas avec l'URL du site */}
           <div className="bg-gradient-to-r from-[#0e7c8a] to-[#14b8c9] py-2 text-center">
@@ -171,16 +172,16 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, onSelectCategory }) => {
       {/* MODALE CATALOGUE — affiche le catalogue Canva directement sur le site */}
       {isCatalogueOpen && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 sm:p-6"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-6"
           onClick={() => setIsCatalogueOpen(false)}
         >
           <div
-            className="relative w-full max-w-5xl h-[85vh] bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col"
+            className="relative w-full max-w-5xl h-[90dvh] sm:h-[85vh] bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Barre supérieure de la modale */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white flex-shrink-0">
-              <h3 className="font-bold text-gray-800 text-sm sm:text-base">
+              <h3 className="font-bold text-gray-800 text-xs sm:text-base pr-3">
                 Catalogue LaKavern — Rentrée 2026/2027
               </h3>
               <button
