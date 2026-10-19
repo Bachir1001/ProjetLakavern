@@ -301,7 +301,7 @@ export const Shop: React.FC<ShopProps> = ({ selectedCategoryId = null }) => {
                           product.images[0].alt ||
                           product.name
                         }
-                        className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        className="h-full w-full object-contain p-2"
                       />
 
                     ) : (
