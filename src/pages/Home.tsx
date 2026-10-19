@@ -206,32 +206,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, onSelectCategory }) => {
         </div>
       )}
 
-      {/* 2. AVANTAGES / ENGAGEMENTS */}
-      <section className="bg-white border-b border-gray-200 py-8 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-          <div className="flex flex-col items-center p-4">
-            <Truck className="w-8 h-8 text-[#00c8db] mb-2" />
-            <h4 className="font-bold text-gray-800 text-sm">Livraison Rapide</h4>
-            <p className="text-xs text-gray-500">À Dakar et partout au Sénégal</p>
-          </div>
-          <div className="flex flex-col items-center p-4">
-            <ShieldCheck className="w-8 h-8 text-[#00c8db] mb-2" />
-            <h4 className="font-bold text-gray-800 text-sm">Qualité Garantie</h4>
-            <p className="text-xs text-gray-500">Marques certifiées & durables</p>
-          </div>
-          <div className="flex flex-col items-center p-4">
-            <Headphones className="w-8 h-8 text-[#00c8db] mb-2" />
-            <h4 className="font-bold text-gray-800 text-sm">Service Commercial</h4>
-            <p className="text-xs text-gray-500">Assistance au 77 240 58 58</p>
-          </div>
-          <div className="flex flex-col items-center p-4">
-            <RefreshCw className="w-8 h-8 text-[#00c8db] mb-2" />
-            <h4 className="font-bold text-gray-800 text-sm">Paiement Facile</h4>
-            <p className="text-xs text-gray-500">Wave, Orange Money & Cash</p>
-          </div>
-        </div>
-      </section>
-
+      
       {/* 3. SECTIONS CATEGORIES PHARES — catégories réelles de WooCommerce */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <h2 className="text-2xl font-bold text-gray-900 mb-8 text-center">
@@ -279,6 +254,31 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, onSelectCategory }) => {
             ))}
           </div>
         )}
+      </section>
+        {/* 2. AVANTAGES / ENGAGEMENTS */}
+      <section className="bg-white border-b border-gray-200 py-8 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+          <div className="flex flex-col items-center p-4">
+            <Truck className="w-8 h-8 text-[#00c8db] mb-2" />
+            <h4 className="font-bold text-gray-800 text-sm">Livraison Rapide</h4>
+            <p className="text-xs text-gray-500">À Dakar et partout au Sénégal</p>
+          </div>
+          <div className="flex flex-col items-center p-4">
+            <ShieldCheck className="w-8 h-8 text-[#00c8db] mb-2" />
+            <h4 className="font-bold text-gray-800 text-sm">Qualité Garantie</h4>
+            <p className="text-xs text-gray-500">Marques certifiées & durables</p>
+          </div>
+          <div className="flex flex-col items-center p-4">
+            <Headphones className="w-8 h-8 text-[#00c8db] mb-2" />
+            <h4 className="font-bold text-gray-800 text-sm">Service Commercial</h4>
+            <p className="text-xs text-gray-500">Assistance au 77 240 58 58</p>
+          </div>
+          <div className="flex flex-col items-center p-4">
+            <RefreshCw className="w-8 h-8 text-[#00c8db] mb-2" />
+            <h4 className="font-bold text-gray-800 text-sm">Paiement Facile</h4>
+            <p className="text-xs text-gray-500">Wave, Orange Money & Cash</p>
+          </div>
+        </div>
       </section>
 
       {/* 4. BANNIÈRE CALL TO ACTION */}
