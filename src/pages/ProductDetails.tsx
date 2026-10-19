@@ -268,7 +268,7 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
                   <img
                     src={image.thumbnail || image.src}
                     alt={image.alt || product.name}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain p-1"
                   />
                 </button>
               ))}
@@ -385,7 +385,7 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
                           <img
                             src={swatchImage}
                             alt={term.name}
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-contain p-1"
                           />
                         ) : variationImagesLoading ? (
                           <span className="w-5 h-5 rounded-full border-2 border-gray-300 border-t-transparent animate-spin" />
@@ -564,7 +564,7 @@ export const ProductDetails: React.FC<ProductDetailsProps> = ({
                       <img
                         src={related.images[0].src}
                         alt={related.images[0].alt || related.name}
-                        className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        className="h-full w-full object-contain p-2"
                       />
                     ) : (
                       <span className="text-gray-400 text-xs">Pas d'image</span>
