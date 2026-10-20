@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X, Eye, EyeOff } from 'lucide-react';
 
 interface AuthModalProps {
@@ -6,296 +6,170 @@ interface AuthModalProps {
   onClose: () => void;
 }
 
-// ⚠️ Remplacez par votre propre Client ID obtenu sur Google Cloud Console
-const GOOGLE_CLIENT_ID = 'VOTRE_CLIENT_ID.apps.googleusercontent.com';
+interface AuthResponse {
+  token?: string;
+  user?: { id: number; username: string; email: string; display_name: string };
+  message?: string;
+}
 
-// ⚠️ Remplacez par l'URL de votre site WordPress
-const WORDPRESS_API_URL = 'https://VOTRE-SITE-WORDPRESS.com/wp-json/monsite/v1/google-auth';
+const API_URL = 'https://lakavernshop.com/wp-json/lakavern-auth/v1';
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 declare global {
   interface Window {
-    google?: any;
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: { client_id: string; callback: (response: { credential: string }) => void }) => void;
+          renderButton: (element: HTMLElement, options: Record<string, unknown>) => void;
+        };
+      };
+    };
   }
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const [googleError, setGoogleError] = useState('');
-
-  // Champs Formulaire
   const [identifier, setIdentifier] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const googleButtonRef = useRef<HTMLDivElement>(null);
 
-  const googleInitialized = useRef(false);
+  const saveSession = (data: AuthResponse) => {
+    if (!data.token || !data.user) throw new Error('Réponse de connexion incomplète.');
+    // Stockage compatible avec le backend actuel. Une session par cookie HttpOnly
+    // serait préférable à terme pour mieux protéger le jeton contre les scripts.
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user');
+    sessionStorage.removeItem('auth_token');
+    sessionStorage.removeItem('auth_user');
+    const store = rememberMe ? localStorage : sessionStorage;
+    store.setItem('auth_token', data.token);
+    store.setItem('auth_user', JSON.stringify(data.user));
+    window.dispatchEvent(new Event('lakavern-auth-changed'));
+    onClose();
+  };
 
-  // Initialise le SDK Google Identity Services une fois le script chargé
+  const request = async (endpoint: string, body: Record<string, string>): Promise<AuthResponse> => {
+    const response = await fetch(`${API_URL}/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data: AuthResponse = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || 'Une erreur est survenue. Veuillez réessayer.');
+    return data;
+  };
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (loading) return;
+    setError('');
+    setSuccess('');
+    setLoading(true);
+    try {
+      if (mode === 'register') {
+        if (password.length < 10) throw new Error('Le mot de passe doit contenir au moins 10 caractères.');
+        const data = await request('register', { username: identifier.trim(), email: email.trim(), password });
+        saveSession(data);
+      } else {
+        const data = await request('login', { identifier: identifier.trim(), password });
+        saveSession(data);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Une erreur est survenue.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleCredential = async (response: { credential: string }) => {
+    setError('');
+    setLoading(true);
+    try {
+      const data = await request('google', { credential: response.credential });
+      saveSession(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'La connexion Google a échoué.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    if (!isOpen) return;
-
-    const initGoogle = () => {
-      if (!window.google || googleInitialized.current) return;
+    if (!isOpen || !GOOGLE_CLIENT_ID) return;
+    let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const initialize = () => {
+      if (cancelled || !window.google?.accounts?.id || !googleButtonRef.current) return false;
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
-        callback: handleGoogleCredentialResponse,
+        callback: handleGoogleCredential,
       });
-      googleInitialized.current = true;
+      googleButtonRef.current.replaceChildren();
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        type: 'standard', theme: 'outline', size: 'large', text: mode === 'login' ? 'signin_with' : 'signup_with',
+        shape: 'rectangular', width: 320,
+      });
+      return true;
     };
-
-    if (window.google) {
-      initGoogle();
-    } else {
-      // Le script GSI (https://accounts.google.com/gsi/client) n'est peut-être pas encore chargé
-      const interval = setInterval(() => {
-        if (window.google) {
-          initGoogle();
-          clearInterval(interval);
-        }
-      }, 200);
-      return () => clearInterval(interval);
+    if (!initialize()) {
+      interval = setInterval(() => { if (initialize() && interval) clearInterval(interval); }, 250);
     }
-  }, [isOpen]);
+    return () => { cancelled = true; if (interval) clearInterval(interval); };
+    // The Google SDK callback is reinitialized when the modal or mode changes.
+  }, [isOpen, mode]);
 
   if (!isOpen) return null;
 
-  // Appelée par Google avec le ID Token une fois l'utilisateur authentifié
-  const handleGoogleCredentialResponse = async (response: { credential: string }) => {
-    setGoogleLoading(true);
-    setGoogleError('');
-    try {
-      const res = await fetch(WORDPRESS_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: response.credential }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || !data.token) {
-        throw new Error(data.message || 'Authentification Google refusée par le serveur.');
-      }
-
-      // Stocke le token de session renvoyé par WordPress
-      localStorage.setItem('auth_token', data.token);
-      if (data.user) {
-        localStorage.setItem('auth_user', JSON.stringify(data.user));
-      }
-
-      onClose();
-    } catch (err) {
-      console.error('Erreur d\'authentification Google :', err);
-      setGoogleError('La connexion avec Google a échoué. Veuillez réessayer.');
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
-
-  // Déclenchée au clic sur le bouton Google
-  const handleGoogleAuthClick = () => {
-    setGoogleError('');
-    if (!window.google) {
-      setGoogleError('Le service Google met du temps à se charger, réessayez dans un instant.');
-      return;
-    }
-    window.google.accounts.id.prompt((notification: any) => {
-      // Si le "One Tap" ne peut pas s'afficher (déjà refusé, pas de session, etc.),
-      // on retombe sur le bouton officiel de Google en dernier recours
-      if (notification.isNotDisplayed?.() || notification.isSkippedMoment?.()) {
-        setGoogleError('Veuillez autoriser les pop-ups Google pour continuer, ou réessayer.');
-      }
-    });
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (mode === 'login') {
-      console.log('Connexion :', { identifier, password, rememberMe });
-    } else {
-      console.log('Inscription :', { identifier, email, password });
-    }
-  };
-
-  const toggleMode = () => {
-    setMode((prev) => (prev === 'login' ? 'register' : 'login'));
-    setShowPassword(false);
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-md bg-white rounded-lg shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        
-        {/* En-tête avec Logo et Bouton Fermer */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <div className="w-full text-center pl-6">
-            <span className="text-2xl font-bold text-[#00c8db]">LaKavern</span>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
-            aria-label="Fermer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="relative w-full max-w-md max-h-[95dvh] overflow-y-auto rounded-xl bg-white shadow-xl" role="dialog" aria-modal="true" aria-label={mode === 'login' ? 'Connexion' : 'Création de compte'}>
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <span className="text-2xl font-bold text-[#00c8db]">LaKavern</span>
+          <button type="button" onClick={onClose} aria-label="Fermer" className="text-gray-500 hover:text-gray-700"><X size={21} /></button>
         </div>
-
-        {/* Corps du formulaire */}
-        <div className="p-8">
-          <h2 className="text-xl font-bold text-center text-gray-800 mb-6">
-            {mode === 'login' ? 'Super de vous revoir!' : 'Créer un compte'}
-          </h2>
-
-          {/* Bouton Google */}
-          <button
-            type="button"
-            onClick={handleGoogleAuthClick}
-            disabled={googleLoading}
-            className="w-full flex items-center justify-center gap-3 border border-gray-300 py-2.5 px-4 rounded hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 mb-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24">
-              <path
-                fill="#4285F4"
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-              />
-            </svg>
-            {googleLoading
-              ? 'Connexion en cours...'
-              : mode === 'login'
-                ? 'Se connecter avec Google'
-                : "S'inscrire avec Google"}
-          </button>
-
-          {googleError && (
-            <p className="text-xs text-red-500 text-center mb-4">{googleError}</p>
+        <div className="p-5 sm:p-8">
+          <h2 className="mb-6 text-center text-xl font-bold text-gray-800">{mode === 'login' ? 'Super de vous revoir !' : 'Créer un compte'}</h2>
+          {GOOGLE_CLIENT_ID ? (
+            <div className="mb-5 flex min-h-11 justify-center" ref={googleButtonRef} aria-label="Connexion avec Google" />
+          ) : (
+            <p className="mb-5 text-center text-xs text-gray-500">Connexion Google en attente de configuration.</p>
           )}
-          {!googleError && <div className="mb-6" />}
-
+          {error && <p role="alert" className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+          {success && <p role="status" className="mb-4 text-sm text-green-700">{success}</p>}
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Nom d'utilisateur */}
             <div>
-              <div className="flex justify-between items-center mb-1 text-sm">
-                <label className="text-gray-700">
-                  {mode === 'login' ? "Nom d'utilisateur ou email" : "Nom d'utilisateur"}{' '}
-                  <span className="text-red-500">*</span>
-                </label>
-                {mode === 'login' && (
-                  <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className="rounded border-gray-300 text-[#00c8db] focus:ring-[#00c8db]"
-                    />
-                    Se souvenir
-                  </label>
-                )}
-              </div>
-              <input
-                type="text"
-                required
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-[#00c8db]"
-              />
+              <label htmlFor="auth-identifier" className="mb-1 block text-sm text-gray-700">{mode === 'login' ? "Nom d'utilisateur ou e-mail" : "Nom d'utilisateur"} *</label>
+              <input id="auth-identifier" autoComplete={mode === 'login' ? 'username' : 'username'} required value={identifier} onChange={e => setIdentifier(e.target.value)} className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-[#00c8db] focus:outline-none" />
             </div>
-
-            {/* Email supplémentaire en mode Inscription */}
-            {mode === 'register' && (
-              <div>
-                <label className="block text-gray-700 text-sm mb-1">
-                  Adresse e-mail <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-[#00c8db]"
-                />
-              </div>
-            )}
-
-            {/* Mot de passe */}
+            {mode === 'register' && <div>
+              <label htmlFor="auth-email" className="mb-1 block text-sm text-gray-700">Adresse e-mail *</label>
+              <input id="auth-email" type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-[#00c8db] focus:outline-none" />
+            </div>}
             <div>
-              <div className="flex justify-between items-center mb-1 text-sm">
-                <label className="text-gray-700">
-                  Mot de passe <span className="text-red-500">*</span>
-                </label>
-                {mode === 'login' && (
-                  <a href="#reset" className="text-xs text-gray-500 hover:text-[#00c8db]">
-                    Perdu?
-                  </a>
-                )}
-              </div>
+              <label htmlFor="auth-password" className="mb-1 block text-sm text-gray-700">Mot de passe *</label>
               <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-[#00c8db] pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+                <input id="auth-password" type={showPassword ? 'text' : 'password'} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={mode === 'register' ? 10 : undefined} required value={password} onChange={e => setPassword(e.target.value)} className="w-full rounded border border-gray-300 px-3 py-2 pr-10 text-sm focus:border-[#00c8db] focus:outline-none" />
+                <button type="button" onClick={() => setShowPassword(v => !v)} aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button>
               </div>
             </div>
-
-            {/* Bouton de Validation */}
-            <button
-              type="submit"
-              className="w-full bg-[#00c8db] hover:bg-[#00b3c4] text-white font-bold py-3 rounded text-xs uppercase tracking-wider transition-colors cursor-pointer mt-2"
-            >
-              {mode === 'login' ? 'CONNECTEZ-VOUS À VOTRE COMPTE' : "S'INSCRIRE"}
-            </button>
+            {mode === 'login' && <div className="flex items-center justify-between gap-2 text-xs">
+              <label className="flex items-center gap-2 text-gray-600"><input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} /> Se souvenir de moi</label>
+              <a href="https://lakavernshop.com/mon-compte/lost-password/" className="text-[#00a6b7] hover:underline">Mot de passe oublié ?</a>
+            </div>}
+            <button type="submit" disabled={loading} className="w-full rounded bg-[#00c8db] py-3 text-xs font-bold uppercase tracking-wide text-white transition-colors hover:bg-[#00b3c4] disabled:opacity-60">{loading ? 'Veuillez patienter…' : mode === 'login' ? 'SE CONNECTER' : "S'INSCRIRE"}</button>
           </form>
-
-          {/* Lien de basculement */}
-          <div className="text-center text-sm text-gray-600 mt-6">
-            {mode === 'login' ? (
-              <>
-                Pas un membre?{' '}
-                <button
-                  type="button"
-                  onClick={toggleMode}
-                  className="text-[#00c8db] hover:underline font-medium cursor-pointer"
-                >
-                  Créer un compte
-                </button>
-              </>
-            ) : (
-              <>
-                Déjà un membre?{' '}
-                <button
-                  type="button"
-                  onClick={toggleMode}
-                  className="text-[#00c8db] hover:underline font-medium cursor-pointer"
-                >
-                  Se connecter
-                </button>
-              </>
-            )}
+          <div className="mt-6 text-center text-sm text-gray-600">
+            {mode === 'login' ? 'Pas encore de compte ? ' : 'Déjà un compte ? '}
+            <button type="button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); setSuccess(''); setPassword(''); }} className="font-medium text-[#00a6b7] hover:underline">{mode === 'login' ? 'Créer un compte' : 'Se connecter'}</button>
           </div>
         </div>
-
       </div>
     </div>
   );
