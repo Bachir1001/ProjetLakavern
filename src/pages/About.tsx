@@ -70,7 +70,7 @@ export const About: React.FC = () => {
           <div className="flex justify-center">
             {/* Remplace "/images/lakavern-shop.jpg" par le chemin de ta photo */}
             <img
-              src="/public/imageAbout.webp"
+              src="/imageAbout.webp"
               alt="Boutique LaKavern"
               className="w-full h-full object-cover rounded-xl border border-[#00c8db]/30"
             />
